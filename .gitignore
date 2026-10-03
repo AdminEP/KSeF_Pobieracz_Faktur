@@ -1,0 +1,19 @@
+# Sekrety
+.env
+*.pem
+*.key
+
+# Dane pobrane z KSeF (faktury = dane osobowe i handlowe)
+FA_Sprzedaz/
+FA_Zakupy/
+FA_Paczki_ZIP/
+*.zip
+*.xml
+
+# Logi i cache
+*.log
+__pycache__/
+*.pyc
+
+# Kopie zapasowe
+*.bak*

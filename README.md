@@ -24,7 +24,7 @@ Skrypt przy starcie przechodzi do katalogu, w którym leży (`os.chdir`), więc 
 ```
 ksef/                                  ← katalog ze skryptem
 ├── pobieracz_ksef.py
-├── .env                               ← Twoja konfiguracja z tokenem i hasłem (tworzysz sam, nie ma jej w repozytorium)
+├── .env                               ← Twoja konfiguracja z tokenem i hasłem (tworzysz sam z .env.example)
 ├── FA_Paczki_ZIP/                     ← surowe paczki po odszyfrowaniu (kopia archiwalna)
 │   ├── paczka_FA_Sprzedaz_20261003_060001.zip
 │   └── paczka_FA_Zakupy_20261003_060042.zip
@@ -47,7 +47,6 @@ Zasady:
 - **Skrypt niczego nie kasuje.** Pliki XML i ZIP-y zostają na dysku po imporcie, więc katalogi rosną. Zaplanuj rotację (np. archiwizacja ZIP-ów starszych niż 90 dni). Źródłem prawdy jest baza, która trzyma pełny XML w `ksef_pliki_xml.plik_xml`.
 - **Import czyta katalogi `FA_Sprzedaz` i `FA_Zakupy` rekurencyjnie.** Typ faktury (`S` lub `Z`) ustala po nazwie katalogu głównego. Nie przenoś ręcznie plików między tymi katalogami.
 - **Uprawnienia:** katalogi zawierają faktury, czyli dane handlowe i osobowe. Ogranicz do niezbędnych kont (`chmod 700`).
-- Katalogi `FA_*` są w `.gitignore`, więc nie trafią do repozytorium.
 
 ## Wymagania
 
@@ -180,13 +179,6 @@ WHERE n.typ_podmiotu = 'Z'
 - Nazwa paczki ZIP zawiera znacznik czasu z dokładnością do sekundy. Przy paczce złożonej z wielu części pobranych w tej samej sekundzie kopie ZIP mogą się nawzajem nadpisać. Nie wpływa to na import (XML są wypakowywane osobno), tylko na kopię archiwalną.
 - Skrypt nie tworzy tabel sam. Użyj `schema.sql`.
 - Skrypt nie ma automatycznych testów.
-
-## Bezpieczeństwo
-
-- **Nie commituj** `.env`, tokenu KSeF, haseł ani pobranych faktur (`FA_*`, `*.zip`, `*.xml`). `.gitignore` to blokuje.
-- Plik `.env` ustaw na `chmod 600`. Użytkownikowi bazy nadaj minimalne uprawnienia.
-- Jeśli token KSeF kiedykolwiek znalazł się w repozytorium lub logu, **unieważnij go w portalu KSeF** i wygeneruj nowy. Samo usunięcie pliku nie wystarczy, bo token zostaje w historii gita.
-- Uwaga na `python -m py_compile` i `__pycache__`: bytecode zawiera stałe ze skryptu. Tu sekretów w kodzie nie ma, ale warto zachować nawyk.
 
 ## Licencja
 

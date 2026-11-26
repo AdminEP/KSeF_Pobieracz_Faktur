@@ -135,14 +135,16 @@ class KsefNaglowek(Base):
     netto_0_wdt     = Column(Numeric(15,2))
     netto_0_inne    = Column(Numeric(15,2))
     netto_zw  = Column(Numeric(15,2))
-    netto_oo  = Column(Numeric(15,2))
-    netto_np  = Column(Numeric(15,2))
-    netto_wnt  = Column(Numeric(15,2))
+    netto_taxi = Column(Numeric(15,2))           # P_13_4: ryczałt dla taksówek osobowych
+    vat_taxi   = Column(Numeric(15,2))           # P_14_4
+    vat_taxi_pln = Column(Numeric(15,2))         # P_14_4W
+    netto_oss  = Column(Numeric(15,2))           # P_13_5: procedura szczególna OSS
+    vat_oss    = Column(Numeric(15,2))           # P_14_5
+    netto_uslugi_art100 = Column(Numeric(15,2))  # P_13_9: usługi z art. 100 ust. 1 pkt 4
     netto_marza = Column(Numeric(15,2))
     netto_poza_pl         = Column(Numeric(15,2))  # P_13_8: usługi poza PL (nie OSS, nie art.100)
     netto_odwr_obciazenie = Column(Numeric(15,2))  # P_13_10: odwrotne obciążenie krajowe kwota
     kurs_waluty           = Column(Numeric(10, 4))  # kurs waluty faktury (dla EUR itp.)
-    data_kursu_waluty     = Column(Date)            # data kursu waluty
     mpp_p18a              = Column(Boolean, default=False)
     metoda_kasowa_p16     = Column(Boolean, default=False)
     samofakturowanie_p17  = Column(Boolean, default=False)
@@ -175,12 +177,23 @@ class KsefNaglowek(Base):
     typ_korekty        = Column(String(10))
     przyczyna_korekty  = Column(Text)
     okres_korygowany   = Column(Text)
-    korekta_netto      = Column(Numeric(15,2))
-    korekta_vat        = Column(Numeric(15,2))
-    korekta_brutto     = Column(Numeric(15,2))
     stopka_krs   = Column(String(50))
     stopka_regon = Column(String(50))
     stopka_bdo   = Column(String(50))
+    # v9: płatności (FA(3) Platnosc)
+    ipksef                      = Column(String(50))
+    termin_opis                 = Column(Text)
+    platnosc_inna               = Column(Boolean)
+    opis_platnosci              = Column(Text)
+    znacznik_zaplaty_czesciowej = Column(String(5))
+    nazwa_banku                 = Column(Text)
+    swift                       = Column(Text)
+    skonto_wysokosc             = Column(Text)
+    # v9: analityka
+    waluta_umowna               = Column(String(3))
+    kurs_umowny                 = Column(Numeric(18,6))
+    nr_fa_korygowany            = Column(String(255))
+    stopka_informacje           = Column(Text)
 
 class KsefPozycja(Base):
     __tablename__ = 'ksef_pozycje'
@@ -209,6 +222,8 @@ class KsefPozycja(Base):
     procedura_wiersza    = Column(String(50))
     stawka_vat_oss       = Column(String(20))  # P_12_XII: stawka VAT OSS w kraju nabywcy
     pkob                 = Column(String(50))  # PKOB: klasyfikacja budowlana
+    gtin                 = Column(String(20))  # v9: GTIN
+    zal_15               = Column(Boolean)     # v9: P_12_Zal_15 (MPP)
 
 class KsefZamowienieWiersz(Base):
     __tablename__ = 'ksef_zamowienia_wiersze'
@@ -260,6 +275,7 @@ class KsefDodatkowyOpis(Base):
     nr_ksef = Column(String(50), ForeignKey('ksef_pliki_xml.nr_ksef', ondelete='CASCADE'))
     klucz   = Column(Text)
     wartosc = Column(Text)
+    nr_wiersza = Column(Integer)  # v9: DodatkowyOpis/NrWiersza
 
 class KsefZalacznik(Base):
     __tablename__ = 'ksef_zalaczniki'
@@ -512,6 +528,27 @@ def xml_do_dict(element):
             wynik[tag] = val
     return wynik
 
+def int_of(node, xpath, default=None):
+    txt = text_of(node, xpath)
+    try:    return int(txt) if txt else default
+    except: return default
+
+def termin_opis_of(fa):
+    """v9: TerminOpis = Ilosc + Jednostka + ZdarzeniePoczatkowe, np. '14 dni od wystawienia'."""
+    opisy = []
+    for t in fa.findall('.//Platnosc//TerminPlatnosci//TerminOpis'):
+        czesci = [(c.text or '').strip() for c in t] if len(t) else [(t.text or '').strip()]
+        opis = ' '.join(c for c in czesci if c)
+        if opis:
+            opisy.append(opis)
+    return ', '.join(opisy) or None
+
+def pole_rachunkow(fa, tag):
+    """v9: pole z kolejnych rachunków (zwykłe, potem faktora), w kolejności jak nr_rachunku_bankowego."""
+    rachunki = fa.findall('.//Platnosc//RachunekBankowy') + fa.findall('.//Platnosc//RachunekBankowyFaktora')
+    wartosci = [text_of(r, tag, '') for r in rachunki]
+    return ', '.join(wartosci) if any(wartosci) else None
+
 def parsuj_podmiot2(root):
     """
     v7 FIX: Pełne parsowanie Podmiot2 (nabywca).
@@ -648,10 +685,9 @@ def parsuj_do_slownikow(xml_zawartosc, nr_ksef_z_api, nazwa_pliku):
 
             "kurs_waluty":       kurs_wal,
             # Kolumna zarezerwowana: parser nie ma z czego jej wypełnić (brak pola z datą kursu), zostaje NULL
-            "data_kursu_waluty": None,
 
             "kwota_netto_suma":  sum(float(c.text or 0) for c in fa if c.tag.startswith('P_13_') and len(c.tag) <= 8),
-            "kwota_vat_suma":    sum(float(c.text or 0) for c in fa if c.tag.startswith('P_14_') and len(c.tag) <= 8),
+            "kwota_vat_suma":    sum(float(c.text or 0) for c in fa if c.tag.startswith('P_14_') and len(c.tag) <= 8 and not c.tag.endswith('W')),
             "kwota_brutto_suma": float_of(fa, 'P_15'),
             "kwota_do_zaplaty":  float_of(fa, './/Rozliczenie//DoZaplaty'),
             "wartosc_zamowienia": float_of(fa, './/Zamowienie//WartoscZamowienia'),
@@ -664,9 +700,9 @@ def parsuj_do_slownikow(xml_zawartosc, nr_ksef_z_api, nazwa_pliku):
             "netto_0_wdt":     float_of(fa, 'P_13_6_2'),
             "netto_0_inne":    float_of(fa, 'P_13_6_1'),
             "netto_zw":   float_of(fa, 'P_13_7'),
-            "netto_oo":   float_of(fa, 'P_13_4'),
-            "netto_np":   float_of(fa, 'P_13_5'),
-            "netto_wnt":  float_of(fa, 'P_13_9'),
+            "netto_taxi": float_of(fa, 'P_13_4'), "vat_taxi": float_of(fa, 'P_14_4'), "vat_taxi_pln": float_of(fa, 'P_14_4W'),
+            "netto_oss":  float_of(fa, 'P_13_5'), "vat_oss":  float_of(fa, 'P_14_5'),
+            "netto_uslugi_art100": float_of(fa, 'P_13_9'),
             "netto_marza": float_of(fa, 'P_13_11'),
             "netto_poza_pl":         float_of(fa, 'P_13_8'),   # usługi poza PL (nie OSS)
             "netto_odwr_obciazenie": float_of(fa, 'P_13_10'),  # odwrotne obciążenie krajowe
@@ -676,7 +712,7 @@ def parsuj_do_slownikow(xml_zawartosc, nr_ksef_z_api, nazwa_pliku):
             "samofakturowanie_p17": bool_of(fa, './/Adnotacje//P_17'),
             # P_18=1 → odwrotne obciążenie (brak dotychczas w bazie)
             "odwrotne_obciazenie":  bool_of(fa, './/Adnotacje//P_18'),
-            # P_23=1 → WNT (bool flag, obok istniejącej kwoty netto_wnt)
+            # P_23=1 → WNT (bool flag, obok istniejącej kwoty netto_uslugi_art100)
             "wnt":                  bool_of(fa, './/Adnotacje//P_23'),
             # P_22=1 → nowe środki transportu
             "nowe_srodki_transportu": bool_of(fa, './/Adnotacje//NoweSrodkiTransportu//P_22'),
@@ -709,13 +745,25 @@ def parsuj_do_slownikow(xml_zawartosc, nr_ksef_z_api, nazwa_pliku):
             "typ_korekty":      text_of(fa, 'TypKorekty'),
             "przyczyna_korekty": text_of(fa, 'PrzyczynaKorekty'),
             "okres_korygowany": text_of(fa, 'OkresFaKorygowanej'),
-            "korekta_netto":    float_of(root, './/SumaKorekty//SumaKwotyKorektyNetto'),
-            "korekta_vat":      float_of(root, './/SumaKorekty//SumaKwotyKorektyPodatku'),
-            "korekta_brutto":   float_of(root, './/SumaKorekty//SumaKwotyKorektyBrutto'),
 
             "stopka_krs":   text_of(root, './/Stopka//Rejestry//KRS'),
             "stopka_regon": text_of(root, './/Stopka//Rejestry//REGON'),
             "stopka_bdo":   text_of(root, './/Stopka//Rejestry//BDO'),
+            "stopka_informacje": "\n".join(el.text.strip() for el in root.findall('.//Stopka//Informacje//StopkaFaktury') if el.text and el.text.strip()) or None,
+
+            # v9: płatności
+            "ipksef":          text_of(fa, './/Platnosc//IPKSeF'),
+            "termin_opis":     termin_opis_of(fa),
+            "platnosc_inna":   bool_of(fa, './/Platnosc/PlatnoscInna'),
+            "opis_platnosci":  text_of(fa, './/Platnosc/OpisPlatnosci'),
+            "znacznik_zaplaty_czesciowej": text_of(fa, './/Platnosc//ZnacznikZaplatyCzesciowej'),
+            "nazwa_banku":     pole_rachunkow(fa, 'NazwaBanku'),
+            "swift":           pole_rachunkow(fa, 'SWIFT'),
+            "skonto_wysokosc": text_of(fa, './/Platnosc//Skonto//WysokoscSkonta'),
+            # v9: analityka
+            "waluta_umowna":    text_of(fa, './/WarunkiTransakcji//WalutaUmowna'),
+            "kurs_umowny":      float_of(fa, './/WarunkiTransakcji//KursUmowny'),
+            "nr_fa_korygowany": text_of(fa, 'NrFaKorygowany'),
         }
 
         # Pozycje faktury
@@ -743,6 +791,8 @@ def parsuj_do_slownikow(xml_zawartosc, nr_ksef_z_api, nazwa_pliku):
                 "procedura_wiersza": text_of(wiersz, 'Procedura'),
                 "stawka_vat_oss":    text_of(wiersz, 'P_12_XII'),  # OSS stawka w kraju nabywcy
                 "pkob":              text_of(wiersz, 'PKOB'),
+                "gtin":   text_of(wiersz, 'GTIN'),
+                "zal_15": bool_of(wiersz, 'P_12_Zal_15'),
                 "stan_pozycji": ("PRZED" if bool_of(wiersz, 'StanPrzed')
                                  else ("PO" if rodzaj in ["KOR", "KOR_ROZ"] else None)),
                 "gtu":   text_of(wiersz, 'GTU'),
@@ -808,7 +858,7 @@ def parsuj_do_slownikow(xml_zawartosc, nr_ksef_z_api, nazwa_pliku):
 
         # Dodatkowe opisy
         opisy_lista = [
-            {"nr_ksef": nr_ksef_z_api, "klucz": text_of(op, 'Klucz'), "wartosc": text_of(op, 'Wartosc')}
+            {"nr_ksef": nr_ksef_z_api, "klucz": text_of(op, 'Klucz'), "wartosc": text_of(op, 'Wartosc'), "nr_wiersza": int_of(op, 'NrWiersza')}
             for op in root.findall('.//DodatkowyOpis')
         ]
 
@@ -840,6 +890,7 @@ def zaladuj_do_postgresql():
     print("🚀 FAZA 2: IMPORT DANYCH DO BAZY POSTGRESQL")
     print("=" * 55)
     session = SessionLocal()
+    problemy_importu = []  # v9: błędy zapisu i parsowania zgłaszane w podsumowaniu
 
     istniejace_ksefy = {row[0] for row in session.query(KsefPlikXml.nr_ksef).all()}
     print(f"🔍 W bazie: {len(istniejace_ksefy)} faktur (pomijam duplikaty).")
@@ -905,10 +956,37 @@ def zaladuj_do_postgresql():
             except Exception as e:
                 session.rollback()
                 print(f"   ❌ Błąd zapisu wsadu: {e}")
+                problemy_importu.append(f"{folder}: błąd zapisu wsadu {start+1}–{min(start+ROZMIAR_WSADU, len(nowe_pliki))}: {str(e)[:200]}")
 
         print(f"✅ Folder '{folder}' zakończony. Błędy parsowania: {bledy}")
+        if bledy:
+            problemy_importu.append(f"{folder}: błędy parsowania: {bledy}")
 
     session.close()
+    return problemy_importu
+
+
+# ==========================================
+# STATUS KSeF Z LATARNI MF (publiczne API, bez logowania)
+# ==========================================
+LATARNIA_URL = os.environ.get("KSEF_LATARNIA_URL", "https://api-latarnia.ksef.mf.gov.pl/status")
+
+def status_latarni():
+    """Zwraca (status, komunikaty). Nigdy nie przerywa przebiegu."""
+    try:
+        r = requests.get(LATARNIA_URL, timeout=10)
+        r.raise_for_status()
+        dane = r.json()
+        return (dane.get("status") or "NIEZNANY"), (dane.get("messages") or [])
+    except Exception as e:
+        return f"NIEZNANY (Latarnia niedostepna: {type(e).__name__})", []
+
+def opis_komunikatow(komunikaty):
+    return [
+        f"{k.get('id', '?')} {k.get('type', '')}: {k.get('title', '')} "
+        f"(od {k.get('start') or '?'} do {k.get('end') or 'odwolania'})"
+        for k in komunikaty
+    ]
 
 
 # ==========================================
@@ -918,11 +996,15 @@ def main_combo():
     sys.stdout.reconfigure(line_buffering=True)   # zeby log rosl na biezaco, a nie dopiero na koncu
     start = datetime.now()
     print("=" * 55)
-    print(f"🌟 ROBOT KSeF v7 🌟   start: {start:%Y-%m-%d %H:%M:%S}")
+    print(f"🌟 ROBOT KSeF v9 🌟   start: {start:%Y-%m-%d %H:%M:%S}")
     print(f"📅 Okres: {DATA_OD_DT:%Y-%m-%d} → {DATA_DO_DT:%Y-%m-%d}")
     print("=" * 55)
 
     problemy = []
+    status_ksef, komunikaty_ksef = status_latarni()
+    print(f"\n🗼 Status KSeF wg Latarni MF: {status_ksef}")
+    for opis in opis_komunikatow(komunikaty_ksef):
+        print(f"   • {opis}")
     try:
         print("\n🚀 FAZA 1: ŁĄCZENIE Z KSeF API")
         challenge, timestamp_ms = pobierz_wyzwanie()
@@ -943,11 +1025,19 @@ def main_combo():
         elif not sledz_status_i_pobierz(access_token, q_id_z, aes_z, iv_z, "FA_Zakupy"):
             problemy.append("ZAKUP: paczka nie została pobrana")
 
-        zaladuj_do_postgresql()
+        problemy.extend(zaladuj_do_postgresql() or [])
     except Exception as e:
         problemy.append(f"błąd krytyczny: {e}")
         print(f"\n❌ Błąd krytyczny: {e}")
         traceback.print_exc()
+
+    if problemy:
+        status_ksef, komunikaty_ksef = status_latarni()
+        if status_ksef != "AVAILABLE":
+            problemy.append(f"KSeF wg Latarni MF: {status_ksef}")
+            problemy.extend(f"komunikat MF {opis}" for opis in opis_komunikatow(komunikaty_ksef))
+        else:
+            print("\n🗼 Latarnia MF: KSeF dostepny, przyczyna bledu lezy raczej po naszej stronie lub w API.")
 
     koniec = datetime.now()
     trwalo = (koniec - start).total_seconds()

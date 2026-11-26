@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS ksef_dodatkowe_opisy (
 	nr_ksef VARCHAR(50),
 	klucz TEXT,
 	wartosc TEXT,
+	nr_wiersza INTEGER,
 	PRIMARY KEY (id),
 	FOREIGN KEY(nr_ksef) REFERENCES ksef_pliki_xml (nr_ksef) ON DELETE CASCADE
 );
@@ -126,14 +127,16 @@ CREATE TABLE IF NOT EXISTS ksef_naglowki (
 	netto_0_wdt NUMERIC(15, 2),
 	netto_0_inne NUMERIC(15, 2),
 	netto_zw NUMERIC(15, 2),
-	netto_oo NUMERIC(15, 2),
-	netto_np NUMERIC(15, 2),
-	netto_wnt NUMERIC(15, 2),
+	netto_taxi NUMERIC(15, 2),
+	vat_taxi NUMERIC(15, 2),
+	vat_taxi_pln NUMERIC(15, 2),
+	netto_oss NUMERIC(15, 2),
+	vat_oss NUMERIC(15, 2),
+	netto_uslugi_art100 NUMERIC(15, 2),
 	netto_marza NUMERIC(15, 2),
 	netto_poza_pl NUMERIC(15, 2),
 	netto_odwr_obciazenie NUMERIC(15, 2),
 	kurs_waluty NUMERIC(10, 4),
-	data_kursu_waluty DATE,
 	mpp_p18a BOOLEAN,
 	metoda_kasowa_p16 BOOLEAN,
 	samofakturowanie_p17 BOOLEAN,
@@ -166,12 +169,21 @@ CREATE TABLE IF NOT EXISTS ksef_naglowki (
 	typ_korekty VARCHAR(10),
 	przyczyna_korekty TEXT,
 	okres_korygowany TEXT,
-	korekta_netto NUMERIC(15, 2),
-	korekta_vat NUMERIC(15, 2),
-	korekta_brutto NUMERIC(15, 2),
 	stopka_krs VARCHAR(50),
 	stopka_regon VARCHAR(50),
 	stopka_bdo VARCHAR(50),
+	ipksef VARCHAR(50),
+	termin_opis TEXT,
+	platnosc_inna BOOLEAN,
+	opis_platnosci TEXT,
+	znacznik_zaplaty_czesciowej VARCHAR(5),
+	nazwa_banku TEXT,
+	swift TEXT,
+	skonto_wysokosc TEXT,
+	waluta_umowna VARCHAR(3),
+	kurs_umowny NUMERIC(18, 6),
+	nr_fa_korygowany VARCHAR(255),
+	stopka_informacje TEXT,
 	PRIMARY KEY (id),
 	FOREIGN KEY(nr_ksef) REFERENCES ksef_pliki_xml (nr_ksef) ON DELETE CASCADE
 );
@@ -217,6 +229,8 @@ CREATE TABLE IF NOT EXISTS ksef_pozycje (
 	procedura_wiersza VARCHAR(50),
 	stawka_vat_oss VARCHAR(20),
 	pkob VARCHAR(50),
+	gtin VARCHAR(20),
+	zal_15 BOOLEAN,
 	PRIMARY KEY (id),
 	FOREIGN KEY(nr_ksef) REFERENCES ksef_pliki_xml (nr_ksef) ON DELETE CASCADE
 );
@@ -261,6 +275,7 @@ CREATE INDEX IF NOT EXISTS ix_korygowane_nr_ksef   ON ksef_faktury_korygowane (n
 CREATE INDEX IF NOT EXISTS ix_zaliczkowe_nr_ksef   ON ksef_faktury_zaliczkowe (nr_ksef_rozliczeniowej);
 CREATE INDEX IF NOT EXISTS ix_opisy_nr_ksef        ON ksef_dodatkowe_opisy (nr_ksef);
 CREATE INDEX IF NOT EXISTS ix_zalaczniki_nr_ksef   ON ksef_zalaczniki (nr_ksef);
+CREATE INDEX IF NOT EXISTS ix_pozycje_gtin         ON ksef_pozycje (gtin) WHERE gtin IS NOT NULL;
 
 -- 4. Komentarze
 COMMENT ON TABLE  ksef_pliki_xml IS 'Surowe faktury XML pobrane z KSeF (1 wiersz = 1 faktura)';
@@ -269,5 +284,10 @@ COMMENT ON TABLE  ksef_pozycje   IS 'Wiersze faktur (FaWiersz)';
 COMMENT ON COLUMN ksef_naglowki.typ_podmiotu   IS 'S = faktura sprzedazy (eksport subject1), Z = faktura zakupu (subject2)';
 COMMENT ON COLUMN ksef_naglowki.rodzaj_faktury IS 'VAT, KOR, ZAL, ROZ, UPR, KOR_ZAL, KOR_ROZ';
 COMMENT ON COLUMN ksef_pliki_xml.url_qr        IS 'Link weryfikacyjny QR do portalu KSeF (NIP/data/hash SHA-256 XML)';
+COMMENT ON COLUMN ksef_naglowki.netto_taxi          IS 'P_13_4: sprzedaz netto objeta ryczaltem dla taksowek osobowych';
+COMMENT ON COLUMN ksef_naglowki.netto_oss           IS 'P_13_5: sprzedaz netto w procedurze szczegolnej OSS';
+COMMENT ON COLUMN ksef_naglowki.netto_uslugi_art100 IS 'P_13_9: uslugi z art. 100 ust. 1 pkt 4 ustawy o VAT';
+COMMENT ON COLUMN ksef_naglowki.kwota_vat_suma      IS 'Suma pol P_14_x w walucie faktury, bez P_14_xW (VAT w PLN)';
+COMMENT ON COLUMN ksef_pozycje.zal_15               IS 'P_12_Zal_15: towar lub usluga z zalacznika 15 (MPP)';
 
 RESET ROLE;

@@ -28,15 +28,17 @@ Zestawienie wynika z kodu `parsuj_do_slownikow` i `parsuj_podmiot2`. Ścieżki X
 | `nazwa_nabywcy`, `nr_klienta`, `email_/telefon_nabywcy` | `Podmiot2/…` |
 | `kraj_`, `kod_pocztowy_`, `miejscowosc_nabywcy` | `Podmiot2/Adres/KodKraju`, `KodPocztowy`, `Miejscowosc` |
 | `czy_jst`, `czy_grupa_vat` | `Podmiot2/JST`, `GV` |
-| `kwota_netto_suma`, `kwota_vat_suma` | suma elementów `P_13_*` i `P_14_*` |
+| `kwota_netto_suma`, `kwota_vat_suma` | suma elementów `P_13_*` i `P_14_*` w walucie faktury (bez `P_14_*W`, czyli VAT przeliczonego na PLN) |
 | `kwota_brutto_suma`, `kwota_do_zaplaty` | `P_15`, `Rozliczenie/DoZaplaty` |
 | `wartosc_zamowienia`, `kwota_zaliczki_p15zk` | `Zamowienie/WartoscZamowienia`, `P_15ZK` |
 | `netto_23/8/5`, `vat_23/8/5`, `vat_*_pln` | `P_13_1..3`, `P_14_1..3`, `P_14_1W..3W` |
 | `netto_0_inne/wdt/eksport` | `P_13_6_1`, `P_13_6_2`, `P_13_6_3` |
-| `netto_oo`, `netto_np`, `netto_zw` | `P_13_4`, `P_13_5`, `P_13_7` |
-| `netto_poza_pl`, `netto_wnt`, `netto_odwr_obciazenie`, `netto_marza` | `P_13_8`, `P_13_9`, `P_13_10`, `P_13_11` |
+| `netto_taxi`, `vat_taxi`, `vat_taxi_pln` | `P_13_4`, `P_14_4`, `P_14_4W` (ryczałt dla taksówek osobowych) |
+| `netto_oss`, `vat_oss` | `P_13_5`, `P_14_5` (procedura szczególna OSS) |
+| `netto_zw` | `P_13_7` |
+| `netto_poza_pl`, `netto_uslugi_art100` | `P_13_8` (poza terytorium kraju), `P_13_9` (usługi z art. 100 ust. 1 pkt 4) |
+| `netto_odwr_obciazenie`, `netto_marza` | `P_13_10`, `P_13_11` |
 | `kurs_waluty` | `KursWalutyZ` (faktury zaliczkowe), w pozostałych `KursWaluty` z pierwszego wiersza |
-| `data_kursu_waluty` | kolumna zarezerwowana, parser jej nie wypełnia (zawsze `NULL`) |
 | `mpp_p18a`, `metoda_kasowa_p16`, `samofakturowanie_p17` | `Adnotacje/P_18A`, `P_16`, `P_17` |
 | `odwrotne_obciazenie`, `wnt`, `nowe_srodki_transportu` | `Adnotacje/P_18`, `P_23`, `NoweSrodkiTransportu/P_22` |
 | `procedura_marzy` | `Adnotacje/PMarzy/P_PMarzy` (`P_PMarzyN` oznacza „nie”) |
@@ -46,11 +48,18 @@ Zestawienie wynika z kodu `parsuj_do_slownikow` i `parsuj_podmiot2`. Ścieżki X
 | `rodzaj_transportu`, `przewoznik_nip`, `przewoznik_nazwa` | `Transport/…` |
 | `termin_platnosci`, `forma_platnosci`, `nr_rachunku_bankowego` | `Platnosc/TerminPlatnosci/Termin`, `FormaPlatnosci`, `RachunekBankowy/NrRB` + `RachunekBankowyFaktora/NrRB` |
 | `czy_zaplacono`, `data_zaplaty`, `kwota_zaplacona` | `Platnosc/Zaplacono`, `DataZaplaty` (lub częściowa), `P_15` lub `ZaplataCzesciowa/KwotaZaplatyCzesciowej` |
-| `skonto_kwota`, `skonto_warunki` | `Platnosc/Skonto/…` |
+| `skonto_kwota`, `skonto_warunki`, `skonto_wysokosc` | `Platnosc/Skonto/…` (`WysokoscSkonta` jako tekst) |
+| `ipksef` | `Platnosc/IPKSeF` (identyfikator płatności KSeF) |
+| `termin_opis` | `Platnosc/TerminPlatnosci/TerminOpis` (`Ilosc` + `Jednostka` + `ZdarzeniePoczatkowe`, np. „14 dni wystawienie faktury”) |
+| `platnosc_inna`, `opis_platnosci` | `Platnosc/PlatnoscInna`, `Platnosc/OpisPlatnosci` |
+| `znacznik_zaplaty_czesciowej` | `Platnosc/ZnacznikZaplatyCzesciowej` |
+| `nazwa_banku`, `swift` | `NazwaBanku`, `SWIFT` z kolejnych rachunków, w tej samej kolejności co `nr_rachunku_bankowego` |
 | `suma_obciazen`, `suma_odliczen` | `Rozliczenie/SumaObciazen`, `SumaOdliczen` |
 | `typ_korekty`, `przyczyna_korekty`, `okres_korygowany` | `TypKorekty`, `PrzyczynaKorekty`, `OkresFaKorygowanej` |
-| `korekta_netto/vat/brutto` | `SumaKorekty/SumaKwotyKorektyNetto|Podatku|Brutto` (korzeń) |
 | `stopka_krs/regon/bdo` | `Stopka/Rejestry/KRS|REGON|BDO` |
+| `stopka_informacje` | `Stopka/Informacje/StopkaFaktury` |
+| `waluta_umowna`, `kurs_umowny` | `WarunkiTransakcji/WalutaUmowna`, `KursUmowny` |
+| `nr_fa_korygowany` | `NrFaKorygowany` (poprawny numer faktury korygowanej) |
 | `typ_podmiotu` | nadawane przez skrypt: `S` (folder `FA_Sprzedaz`) lub `Z` (`FA_Zakupy`) |
 
 ## ksef_pozycje (element `FaWiersz`)
@@ -63,7 +72,8 @@ Zestawienie wynika z kodu `parsuj_do_slownikow` i `parsuj_podmiot2`. Ścieżki X
 | `kwota_rabatu_wiersza`, `wartosc_netto_wiersza`, `wartosc_brutto_wiersza` | `P_10`, `P_11`, `P_11A` |
 | `stawka_vat`, `kwota_vat_wiersza`, `stawka_vat_oss` | `P_12`, `P_11Vat`, `P_12_XII` |
 | `kurs_waluty`, `kwota_akcyzy`, `procedura_wiersza` | `KursWaluty`, `KwotaAkcyzy`, `Procedura` |
-| `gtu`, `cn`, `pkwiu`, `pkob` | `GTU`, `CN`, `PKWiU`, `PKOB` |
+| `gtu`, `cn`, `pkwiu`, `pkob`, `gtin` | `GTU`, `CN`, `PKWiU`, `PKOB`, `GTIN` |
+| `zal_15` | `P_12_Zal_15` (towar lub usługa z załącznika 15, MPP) |
 | `stan_pozycji` | `PRZED` gdy `StanPrzed`; `PO` dla faktur `KOR`/`KOR_ROZ`; inaczej puste |
 
 ## Pozostałe tabele

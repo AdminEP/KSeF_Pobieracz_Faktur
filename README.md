@@ -12,6 +12,7 @@ Technicznie: uwierzytelnianie **tokenem KSeF** (nie certyfikatem), pobieranie pr
 2. Pobiera zaszyfrowane paczki, **odszyfrowuje je** i rozpakowuje faktury jako pliki **XML** do katalogów `FA_Sprzedaz/` i `FA_Zakupy/`.
 3. **Parsuje każdy nowy XML** (FA(3)) i zapisuje go w PostgreSQL: surowy XML w jednej tabeli oraz dane rozbite na kolumny (nagłówek, pozycje, korekty, płatności, załączniki).
 4. Pomija faktury, które już są w bazie, więc można go uruchamiać z crona wiele razy dziennie.
+5. Na początku przebiegu sprawdza publiczny status KSeF w [Latarni MF](https://github.com/CIRFMF/ksef-latarnia). Gdy przebieg się nie uda, a KSeF ma awarię lub przerwę, dopisuje to do podsumowania błędów.
 
 Efekt: masz w SQL aktualną bazę wszystkich faktur z KSeF i możesz robić raporty zwykłym `SELECT`-em, bez ręcznego pobierania plików z portalu.
 
@@ -66,6 +67,8 @@ pip install -r requirements.txt
 psql -U postgres -v ksef_pass='TWOJE_HASLO' -f schema.sql
 ```
 
+Masz bazę utworzoną starszym `schema.sql` (sprzed 2026-11-26)? Uruchom `migracje/2026-11-26_v9.sql` razem z aktualizacją skryptu: zmienia nazwy kolumn `netto_oo`, `netto_np`, `netto_wnt` na `netto_taxi`, `netto_oss`, `netto_uslugi_art100` (zgodnie z opisem pól w broszurze MF FA(3)) i dodaje nowe kolumny.
+
 `schema.sql` tworzy rolę `ksef`, bazę `ksef_ep`, 9 tabel, indeksy i komentarze. Jest idempotentny. Hasło podajesz jako zmienną psql i nie trafia do pliku. Jeśli masz własną bazę/użytkownika, usuń sekcję 1 i dostosuj `\connect`.
 
 ### 2. Konfiguracja (zmienne środowiskowe)
@@ -79,6 +82,7 @@ Skopiuj `.env.example` do `.env` i uzupełnij. Skrypt czyta konfigurację wyłą
 | `DB_PASS` | tak | hasło użytkownika bazy |
 | `KSEF_BASE_URL` | nie | domyślnie produkcja `https://api.ksef.mf.gov.pl/v2`; test: `https://api-test.ksef.mf.gov.pl/v2` |
 | `KSEF_DNI_WSTECZ` | nie | okno pobierania w dniach (domyślnie 7) |
+| `KSEF_LATARNIA_URL` | nie | adres statusu Latarni MF (domyślnie `https://api-latarnia.ksef.mf.gov.pl/status`) |
 | `DB_USER`, `DB_HOST`, `DB_PORT`, `DB_NAME` | nie | domyślnie `ksef`, `localhost`, `5432`, `ksef_ep` |
 
 ### 3. Uruchomienie
@@ -174,10 +178,10 @@ WHERE n.typ_podmiotu = 'Z'
 
 - Zakres dat eksportu jest liczony w **strefie czasowej systemu**, na którym działa skrypt (z poprawnym czasem letnim i zimowym). Serwer powinien mieć ustawioną strefę `Europe/Warsaw`; przy UTC okno będzie przesunięte o 1–2 godziny, co przy oknie 7 dni nie ma praktycznego znaczenia.
 - Wywołania HTTP mają limity czasu (10 s na połączenie, 60 s na odpowiedź, 300 s przerwy przy pobieraniu paczki). Chwilowy błąd sieci przy sprawdzaniu statusu paczki jest ponawiany; w pozostałych miejscach kończy przebieg błędem, a następne uruchomienie nadrabia zaległości.
-- Kolumna `ksef_naglowki.data_kursu_waluty` jest zarezerwowana i zawsze pusta. Parser zapisuje kurs (`kurs_waluty`), ale nie datę kursu.
 - Dane w tabelach, w tym zapisy numerów rachunków i adresów, są wprost z faktur. Chroń bazę jak dane osobowe i handlowe.
 - Nazwa paczki ZIP zawiera znacznik czasu z dokładnością do sekundy. Przy paczce złożonej z wielu części pobranych w tej samej sekundzie kopie ZIP mogą się nawzajem nadpisać. Nie wpływa to na import (XML są wypakowywane osobno), tylko na kopię archiwalną.
 - Skrypt nie tworzy tabel sam. Użyj `schema.sql`.
+- Błąd zapisu wsadu do bazy albo błąd parsowania pliku kończy przebieg komunikatem „Z BŁĘDAMI” i kodem wyjścia 1, więc cron może o nim powiadomić. Pliki zostają na dysku i są wczytywane ponownie przy następnym uruchomieniu.
 - Skrypt nie ma automatycznych testów.
 
 ## Licencja
